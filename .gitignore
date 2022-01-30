@@ -3,6 +3,6 @@
 mturk/
 *.DS_Store
 *.wav
-images/
+imgs/
 models/
 
