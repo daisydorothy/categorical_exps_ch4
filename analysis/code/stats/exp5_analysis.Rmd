@@ -1,0 +1,125 @@
+---
+title: Analysis of ordered (HRT), (ING) stims
+output: html_document
+---
+
+# CH3: Offline categorical selections for (HRT) and (ING) in Experiment 5 
+**Experiment 5:** (HRT) stims, then (ING) stims
+
+The csv called here is already preprocessed (attention checked, etc.)
+
+## Prelims
+
+```{r}
+library(tidyverse)
+library(brms)
+library(bayestestR)
+library(see) #for plotting
+source("../analysis_helpers/preprocessing_singlespeaker.R")
+source("../analysis_helpers/visualizing_singlespeaker.R")
+source("../analysis_helpers/stan_utility.R")
+source("../analysis_helpers/helpers.R")
+```
+
+## Get data
+
+```{r}
+cat_data <- read.csv('../../data/categorical_exp_data.csv')
+
+```
+
+```{r}
+cat_data <- cat_data %>% filter(criticality == 'CRITICAL') # we're not interested in fillers 
+cat_data$condition <- factor(cat_data$condition, levels = c('Declarative' , 'HRT', 'ing', 'in'))
+cat_data$styletype <- factor(cat_data$styletype, levels = c('(HRT)', '(ING)'))
+```
+
+## Make dfs
+
+```{r}
+exp5_tough.df <- cat_data %>%
+  filter(expcode == 5, styletype == '(ING)') 
+
+
+exp5_valley.df <- cat_data %>%
+  filter(expcode == 5,  styletype == '(HRT)') 
+```
+
+
+
+## Model
+
+### TOUGHS
+
+#### Weakly informative priors
+See eg https://discourse.mc-stan.org/t/default-priors-for-logistic-regression-coefficients-in-brms/13742/4 and McElreath 2020
+
+```{r}
+exp5_tough.modInform <- brm(target_selection ~ condition + (1+condition|participant) + (1+condition|stim_type), 
+                               family="bernoulli", 
+                               data= exp5_tough.df,
+                                 prior = c(prior(normal(0, 2), class = b)),
+                               #prior = c(prior(normal(0, 2), class = Intercept), prior(normal(0, 2), class = b)),
+                                iter = 5000,
+                               seed = 12345) #w default (2000 iter, rhat)
+                               #control = list(adapt_delta = 0.99, max_treedepth = 15))
+
+#set_prior("<prior>",class = "b"). T
+#coef = "x2"
+```
+
+```{r}
+saveRDS(exp5_tough.modInform, '../../models/exp5_tough.modInform.Rds')
+```
+
+```{r}
+exp5_tough.modInform <- readRDS('../../models/exp5_tough.modInform.Rds')
+```
+
+```{r}
+summary(exp5_tough.modInform)
+exp5_tough.modInform_posterior_summ = describe_posterior(exp5_tough.modInform, centrality = "MAP", test = c("p_direction","rope"), ci=0.95, rope_ci=1)
+exp5_tough.modInform_posterior_summ
+```
+
+
+```{r}
+make_post_summ_table(exp5_tough.modInform_posterior_summ)
+```
+
+
+### VALLEYS
+
+#### Weakly informative priors
+See eg https://discourse.mc-stan.org/t/default-priors-for-logistic-regression-coefficients-in-brms/13742/4 and McElreath 2020
+
+```{r}
+exp5_valley.modInform <- brm(target_selection ~ condition + (1+condition|participant) + (1+condition|stim_type), 
+                               family="bernoulli", 
+                               data= exp5_valley.df,
+                                 prior = c(prior(normal(0, 2), class = b)),
+                               #prior = c(prior(normal(0, 2), class = Intercept), prior(normal(0, 2), class = b)),
+                                iter = 10000,
+                             cores = 8,
+                               seed = 12345,
+                               control = list(adapt_delta = 0.99))
+```
+
+```{r}
+saveRDS(exp5_valley.modInform, '../../models/exp5_valley.modInform.Rds')
+```
+
+```{r}
+exp5_valley.modInform <- readRDS('../../models/exp5_valley.modInform.Rds')
+```
+
+```{r}
+summary(exp5_valley.modInform)
+exp5_valley.modInform_posterior_summ = describe_posterior(exp5_valley.modInform, centrality = "MAP", test = c("p_direction","rope"), ci=0.95, rope_ci=1)
+exp5_valley.modInform_posterior_summ
+```
+
+
+```{r}
+make_post_summ_table(exp5_valley.modInform_posterior_summ)
+```

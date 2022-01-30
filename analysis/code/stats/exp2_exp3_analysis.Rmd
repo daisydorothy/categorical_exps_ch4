@@ -1,0 +1,226 @@
+---
+title: analysis of ING-only and HRT-only stims
+output: html_document
+---
+
+# CH3: Offline categorical selections for (ING) and (HRT) in Experiments 2 and 3
+**Experiment 2:** (ING) stims only
+
+**Experiment 3:** (HRT) stims only
+
+The csv called here is already preprocessed (attention checked, etc.)
+
+## Prelims
+
+```{r}
+library(tidyverse)
+library(brms)
+library(bayestestR)
+library(see) #for plotting
+library(lme4)
+library(emmeans)
+library(sjPlot)
+source("../analysis_helpers/preprocessing_singlespeaker.R")
+source("../analysis_helpers/visualizing_singlespeaker.R")
+source("../analysis_helpers/stan_utility.R")
+source("../analysis_helpers/helpers.R")
+
+## Get data
+
+```{r}
+cat_data <- read.csv('../../data/categorical_exp_data.csv')
+```
+
+```{r}
+cat_data <- cat_data %>% filter(criticality == 'CRITICAL') # we're not interested in fillers 
+cat_data$condition <- factor(cat_data$condition, levels = c('Declarative' , 'HRT', 'ing', 'in'))
+cat_data$styletype <- factor(cat_data$styletype, levels = c('(HRT)', '(ING)'))
+
+
+```
+
+## Make dfs
+
+```{r}
+exp2_tough.df <- cat_data %>%
+  filter(expcode == 2, styletype == '(ING)') 
+exp2_tough.df$c_condition <- myCenter(exp2_tough.df$condition)
+
+exp3_valley.df <- cat_data %>%
+  filter(expcode == 3,  styletype == '(HRT)') 
+exp3_valley.df$c_condition <- myCenter(exp3_valley.df$condition)
+```
+
+
+## Model
+
+### TOUGHS
+
+#### Weakly informative priors
+See eg https://discourse.mc-stan.org/t/default-priors-for-logistic-regression-coefficients-in-brms/13742/4 and McElreath 2020
+
+```{r}
+exp2_tough.modInform <- brm(target_selection ~ condition + left_choice_type + (1+condition|participant) + (1+condition|stim_type), 
+                               family="bernoulli", 
+                               data= exp2_tough.df,
+                                 prior = c(prior(normal(0, 2), class = b)),
+                                iter = 5000,
+                               seed = 12345, #w default (2000 iter, rhat)
+                               control = list(adapt_delta = 0.99, max_treedepth = 15))
+
+#set_prior("<prior>",class = "b"). T
+#coef = "x2"
+```
+
+```{r}
+saveRDS(exp2_tough.modInform, file = '../../models/exp2_tough.modInform.Rds')
+```
+
+```{r}
+exp2_tough.modInform <- readRDS('../../models/exp2_tough.modInform.Rds')
+```
+
+```{r}
+summary(exp2_tough.modInform)
+exp2_tough.modInform_posterior_summ <- describe_posterior(exp2_tough.modInform, centrality = "MAP", test = c("p_direction","rope"), ci=0.95, rope_ci=1)
+```
+
+
+```{r}
+make_post_summ_table(exp2_tough.modInform_posterior_summ)
+```
+
+
+### VALLEYS
+
+#### Weakly informative priors
+See eg https://discourse.mc-stan.org/t/default-priors-for-logistic-regression-coefficients-in-brms/13742/4 and McElreath 2020
+
+```{r}
+exp3_valley.modInform <- brm(target_selection ~ condition + (1+condition|participant) + (1+condition|stim_type), 
+                               family="bernoulli", 
+                               data= exp3_valley.df,
+                                 prior = c(prior(normal(0, 2), class = b)),
+                               #prior = c(prior(normal(0, 2), class = Intercept), prior(normal(0, 2), class = b)),
+                                iter = 7500,
+                             cores = 8,
+                               seed = 12345) #w default (2000 iter, rhat)
+                               #control = list(adapt_delta = 0.99, max_treedepth = 15))
+
+#set_prior("<prior>",class = "b"). T
+#coef = "x2"
+```
+
+```{r}
+saveRDS(exp3_valley.modInform, file = '../../models/exp3_valley.modInform.Rds')
+```
+
+```{r}
+exp3_valley.modInform <- readRDS('../../models/exp3_valley.modInform.Rds')
+```
+
+```{r}
+summary(exp3_valley.modInform)
+exp3_valley.modInform_posterior_summ = describe_posterior(exp3_valley.modInform, centrality = "MAP", test = c("p_direction","rope"), ci=0.95, rope_ci=1)
+exp3_valley.modInform_posterior_summ
+```
+
+
+```{r}
+make_post_summ_table(exp3_valley.modInform_posterior_summ)
+```
+
+
+
+
+# Trial order
+
+```{r}
+exp2_tough_trial.plot <- plot_categorical_selections_by_trial_n(exp2_tough.df, toughPalette)
+```
+
+```{r}
+exp2_tough_trial.plot
+```
+
+```{r}
+exp2_tough_halves.df <- exp2_tough.df %>%
+mutate(half = as.factor(ifelse(trial_no <= 14, 'first', 'second')))
+```
+
+```{r}
+exp2_tough_half.mod <-  brm(target_selection ~ condition*half + (1+condition|participant) + (1+condition|stim_type), 
+                               family="bernoulli", 
+                               data= exp2_tough_halves.df,
+                                 prior = c(prior(normal(0, 2), class = b)),
+                               #prior = c(prior(normal(0, 2), class = Intercept), prior(normal(0, 2), class = b)),
+                                iter = 7500,
+                             cores = 8,
+                               seed = 12345, #w default (2000 iter, rhat)
+                               control = list(adapt_delta = 0.99, max_treedepth = 15))
+```
+
+```{r}
+saveRDS(exp2_tough_half.mod, file = "../../models/exp2_tough_half.mod.Rds")
+```
+
+```{r}
+exp2_tough_half.mod <- readRDS("../../models/exp2_tough_half.mod.Rds")
+```
+
+```{r}
+summary(exp2_tough_half.mod)
+exp2_tough_half_posterior_summ = describe_posterior(exp2_tough_half.mod, centrality = "MAP", test = c("p_direction","rope"), ci=0.95, rope_ci=1)
+exp2_tough_half_posterior_summ 
+```
+
+```{r}
+make_post_summ_table(exp2_tough_half_posterior_summ )
+
+````
+#### Now Valleys
+
+```{r}
+exp3_valley_trial.plot <- plot_categorical_selections_by_trial_n(exp3_valley.df, valleyPalette)
+```
+
+```{r}
+exp3_valley_trial.plot
+```
+
+```{r}
+exp3_valley_halves.df <- exp3_valley.df %>%
+mutate(half = as.factor(ifelse(trial_no <= 14, 'first', 'second')))
+levels(exp3_valley_halves.df$half)
+```
+
+```{r}
+exp3_valley_half.mod <-  brm(target_selection ~ condition*half + (1+condition|participant) + (1+condition|stim_type), 
+                               family="bernoulli", 
+                               data= exp3_valley_halves.df,
+                                 prior = c(prior(normal(0, 2), class = b)),
+                               #prior = c(prior(normal(0, 2), class = Intercept), prior(normal(0, 2), class = b)),
+                                iter = 7500,
+                             cores = 8,
+                               seed = 12345, #w default (2000 iter, rhat)
+                               control = list(adapt_delta = 0.99, max_treedepth = 15))
+```
+
+```{r}
+saveRDS(exp3_valley_half.mod, file = "../../models/exp3_valley_half.mod.Rds")
+```
+
+```{r}
+exp3_valley_half.mod <- readRDS("../../models/exp3_valley_half.mod.Rds")
+```
+
+```{r}
+summary(exp3_valley_half.mod)
+exp3_valley_half_posterior_summ = describe_posterior(exp3_valley_half.mod, centrality = "MAP", test = c("p_direction","rope"), ci=0.95, rope_ci=1)
+exp3_valley_half_posterior_summ 
+```
+
+```{r}
+make_post_summ_table(exp3_valley_half_posterior_summ )
+```
+

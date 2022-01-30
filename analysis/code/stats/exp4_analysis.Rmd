@@ -1,0 +1,173 @@
+---
+title: Analysis of ordered (ING),(HRT) stims experiment
+output: html_document
+---
+
+# CH3: Offline categorical selections for (ING) and (HRT) in Experiment 4 
+**Experiment 4:** (ING) stims, then (HRT) stims
+
+The csv called here is already preprocessed (attention checked, etc.)
+
+## Prelims
+
+```{r}
+library(tidyverse)
+library(brms)
+library(bayestestR)
+library(see) #for plotting
+library(insight)
+source("../analysis_helpers/preprocessing_singlespeaker.R")
+source("../analysis_helpers/visualizing_singlespeaker.R")
+source("../analysis_helpers/stan_utility.R")
+source("../analysis_helpers/helpers.R")
+```
+
+```{r}
+n_distinct(exp4_tough.df$participant)
+```
+
+## Get data
+
+```{r}
+cat_data <- read.csv('../../data/categorical_exp_data.csv')
+
+```
+
+```{r}
+cat_data <- cat_data %>% filter(criticality == 'CRITICAL') # we're not interested in fillers 
+cat_data$condition <- factor(cat_data$condition, levels = c('Declarative' , 'HRT', 'ing', 'in'))
+cat_data$styletype <- factor(cat_data$styletype, levels = c('(HRT)', '(ING)'))
+```
+
+## Make dfs
+
+```{r}
+exp4.df <- cat_data %>%
+  filter(expcode == 4)
+
+exp4_tough.df <- cat_data %>%
+  filter(expcode == 4, styletype == '(ING)') 
+
+exp4_valley.df <- cat_data %>%
+  filter(expcode == 4,  styletype == '(HRT)') 
+```
+
+```{r}
+nrow(exp4.df)/2
+```
+
+
+## Model
+
+### TOUGHS
+
+#### Weakly informative priors
+See eg https://discourse.mc-stan.org/t/default-priors-for-logistic-regression-coefficients-in-brms/13742/4 and McElreath 2020
+
+```{r}
+exp4_tough.modInform <- brm(target_selection ~ condition + left_choice_type + (1+condition|participant) + (1+condition|stim_type), 
+                               family="bernoulli", 
+                               data= exp4_tough.df,
+                                 prior = c(prior(normal(0, 2), class = b)),
+                               #prior = c(prior(normal(0, 2), class = Intercept), prior(normal(0, 2), class = b)),
+                                #iter = 5000,
+                               seed = 12345) #w default (2000 iter, rhat)
+                               #control = list(adapt_delta = 0.99, max_treedepth = 15))
+
+#set_prior("<prior>",class = "b"). T
+#coef = "x2"
+```
+
+```{r}
+saveRDS(exp4_tough.modInform, '../../models/exp4_tough.modInform.Rds')
+```
+
+```{r}
+exp4_tough.modInform <- readRDS('../../models/exp4_tough.modInform.Rds')
+```
+
+```{r}
+summary(exp4_tough.modInform)
+exp4_tough.modInform_posterior_summ = describe_posterior(exp4_tough.modInform, centrality = "MAP", test = c("p_direction","rope"), ci=0.95, rope_ci=1)
+exp4_tough.modInform_posterior_summ
+```
+
+
+
+```{r}
+make_post_summ_table(exp4_tough.modInform_posterior_summ)
+```
+
+
+### VALLEYS
+
+#### Weakly informative priors
+See eg https://discourse.mc-stan.org/t/default-priors-for-logistic-regression-coefficients-in-brms/13742/4 and McElreath 2020
+
+```{r}
+exp4_valley.modInform <- brm(target_selection ~ condition + (1+condition|participant) + (1+condition|stim_type), 
+                               family="bernoulli", 
+                               data= exp4_valley.df,
+                                 prior = c(prior(normal(0, 2), class = b)),
+                               #prior = c(prior(normal(0, 2), class = Intercept), prior(normal(0, 2), class = b)),
+                                iter = 7500,
+                             cores = 8,
+                               seed = 12345, #w default (2000 iter, rhat)
+                               control = list(adapt_delta = 0.99, max_treedepth = 15))
+
+#set_prior("<prior>",class = "b"). T
+#coef = "x2"
+```
+
+```{r}
+saveRDS(exp4_valley.modInform, '../../models/exp4_valley.modInform.Rds')
+```
+
+```{r}
+exp4_valley.modInform <- readRDS('../../models/exp4_valley.modInform.Rds')
+```
+
+```{r}
+summary(exp4_valley.modInform)
+exp4_valley.modInform_posterior_summ = describe_posterior(exp4_valley.modInform, centrality = "MAP", test = c("p_direction","rope"), ci=0.95, rope_ci=1)
+exp4_valley.modInform_posterior_summ
+```
+
+
+```{r}
+make_post_summ_table(exp4_valley.modInform_posterior_summ)
+```
+
+
+# FULL COND MODS
+ALL CONDITIONS in the SAME MODEl
+
+```{r}
+exp4.mod <-  brm(target_selection ~ condition + (1+condition|participant) + (1+condition|stim_type), 
+                               family="bernoulli", 
+                               data= exp4.df,
+                                 prior = c(prior(normal(0, 2), class = b)),
+                               #prior = c(prior(normal(0, 2), class = Intercept), prior(normal(0, 2), class = b)),
+                                #iter = 7500,
+                             cores = 8,
+                               seed = 12345) #w default (2000 iter, rhat)
+                               #control = list(adapt_delta = 0.99, max_treedepth = 15)
+```
+
+```{r}
+exp4_inref.df <- exp4.df 
+exp4_inref.df$condition <- relevel(exp4_inref.df$condition, ref='ing')
+```
+
+```{r}
+exp4_inref.mod <-  brm(target_selection ~ condition + (1+condition|participant) + (1+condition|stim_type), 
+                               family="bernoulli", 
+                               data= exp4_inref.df,
+                                 prior = c(prior(normal(0, 2), class = b)),
+                               #prior = c(prior(normal(0, 2), class = Intercept), prior(normal(0, 2), class = b)),
+                                #iter = 7500,
+                             cores = 8,
+                               seed = 12345) #w default (2000 iter, rhat)
+                               #control = list(adapt_delta = 0.99, max_treedepth = 15)
+```
+

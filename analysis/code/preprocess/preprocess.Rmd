@@ -1,0 +1,269 @@
+---
+title: "Ch.3: Offline Categorical Selections for (ING) and (HRT) - PREPROCESSING"
+output: html_notebook
+---
+
+---
+```{r}
+library(tidyr)
+library(ggplot2)
+library(lme4)
+library(lmerTest)
+library(stringr)
+library(optimx)
+library(dfoptim)
+library(insight)
+library(jtools)
+personaPalette <- c("#E69F00",  "#ffdf98", "#56B4E9","#9bd3f2")
+source("../../../analysis_helpers/preprocessing_singlespeaker.R")
+source("../../../analysis_helpers/visualizing_singlespeaker.R")
+source("../../../analysis_helpers/helpers.R")
+```
+
+Get data
+```{r}
+exp1_random <- read.csv("../../data/exp1_tidy.csv")
+exp2_tough <- read.csv(".../../data/exp2_tidy.csv")
+exp3_valley <- read.csv("../../data/exp3_tidy.csv")
+exp4_tv <- read.csv("../../data/exp4_tidy.csv")
+exp5_vt <- read.csv("../../data/exp5_tidy.csv")
+```
+
+```{r}
+exp1_random.tidy <- exp1_random %>%
+  mutate(exptype = 'exp1_random',
+         expcode = 1)
+exp2_tough.tidy <- exp2_tough %>%
+  mutate(exptype = 'exp2_exp3_solo_cue',
+         expcode = 2)
+exp3_valley.tidy <- exp3_valley %>%
+  mutate(exptype = 'exp2_exp3_solo_cue', 
+         expcode = 3)
+exp4_tv.tidy <- exp4_tv %>%
+  mutate(exptype = 'exp4_tv_ordered',
+         expcode = 4)
+exp5_vt.tidy <- exp5_vt %>%
+  mutate(exptype = 'exp5_vt_ordered',
+         expcode = 5)
+
+expdata <- exp1_random.tidy %>%
+  bind_rows(exp2_tough.tidy) %>%
+  bind_rows(exp3_valley.tidy)%>%
+  bind_rows(exp4_tv.tidy) %>%
+  bind_rows(exp5_vt.tidy)
+
+expdata <- expdata %>%
+ mutate(stim_type = tolower(gsub("_\\w{2,4}_\\d{1}_\\w{2,4}_\\d{1}", '', trial)),
+        stim_type_short = str_extract(stim_type, "[[:alpha:]]+$"),
+        participant = paste(expcode, participant, sep='_'),
+        styletype = ifelse(condition == 'in' | condition == 'ing', '(ING)',
+                           ifelse(condition == 'HRT' | condition == 'Declarative', '(HRT)', 'Filler')))
+
+expdata$condition <- factor(expdata$condition, levels = c('in', 'ing', 'HRT', 'Declarative', 'F', 'M'))
+expdata$participant <- as.factor(expdata$participant)
+
+
+# We are going to Tough-target code the HRT stims - s.t. they are on the same scale as the ING stims. 
+# That is; target-selection == 1 when people click a Tough (after hearing HRT / Decl) and 0 with a valley
+expdata <- expdata %>%
+  mutate(v_target_selection = ifelse(styletype == '(HRT)', cat_selection,
+                                  ifelse(styletype == 'ING' & cat_selection == 1, 0, 1)),
+         target_selection = ifelse(styletype == '(HRT)' & cat_selection == 1, 0, 
+                                ifelse(styletype == '(HRT)' & cat_selection == 0, 1, cat_selection)))
+
+
+```
+
+# Just check all exclusions are same for all exps
+
+```{r}
+ggplot(expdata, aes(x = participant_filler_score)) +
+  geom_histogram()
+
+ggplot(expdata, aes(x = participant_scene_score)) +
+  geom_histogram()
+
+test <- expdata %>%
+  ungroup %>%
+  filter(participant_filler_score< 13) %>%
+  filter(language != "1", language != "2", language != "3", language != "4", language != "Nancy", language != "Chinese", language != "Romanian") %>%
+  filter(participant_scene_score > 5) %>% #otherwise will distort the mean and come on, if you are getting below 5 you aren't doing the task right
+  summarize(mean_filler = mean(participant_filler_score), 
+            mean_scene = mean(participant_scene_score),
+            sd_filler = sd(participant_filler_score),
+            sd_scene = sd(participant_scene_score)) %>%
+  mutate(filler_cut_off = mean_filler-(3*sd_filler),
+         scene_cut_off = mean_scene - (3*sd_scene))
+test
+
+
+
+expdata.clean <- expdata %>%
+  filter(participant_filler_score >= 11, participant_scene_score >= 23) %>%
+  filter(language != "1", language != "2", language != "3", language != "4", language != "Nancy", language != "Chinese", language != "Romanian") %>%
+  group_by(participant, expcode) %>% 
+  mutate(n_obs = n()) %>%
+  filter(n_obs < 25) %>% # some people managed to take more than once/submitted more than once; exclude entirely (nb i think this was a mturk-side bug, have tried looking for it)
+  select(-n_obs) %>%
+  ungroup() 
+
+
+n_distinct(expdata.clean$participant) #1024 just lg, #408 harshest, #604 less harsh, #682 least harsh
+# 4 dupes
+# 24 language
+# 189 filler  >= 11
+# 169 filler  >= 10
+# 333 scene score >= 22
+# 422 scene score >= 23
+n_distinct(expdata$participant) # 1052
+
+ n_distinct(expdata$participant) - n_distinct(expdata.clean$participant) 
+```
+
+
+
+
+
+
+
+
+
+
+
+#Do people choose tough/valley more often when t/v is on left (or right) side? ie, does img position have an effect on cue-congruent categorizations?
+if not, then it doesn't matter so much if there are unequal numbers in img-position flipped lists - so long as same numbers for each cue-style condiiton
+```{r}
+
+tough.df <- expdata %>%
+  filter(styletype == '(ING)')
+all_tough_exps_position.plot <- plot_categorical_selections(tough.df, toughPalette, left_choice_type)
+all_tough_exps_position.plot
+
+valley.df <- expdata %>%
+  filter(styletype == '(HRT)')
+all_valley_exps_position.plot <- plot_categorical_selections(valley.df, valleyPalette,left_choice_type)
+all_valley_exps_position.plot
+
+tough.mod.pos <- glmer(cat_selection ~ condition  + left_choice_type + (1|participant) + (1|exptype)+ (1|stim_type)  + (1+condition|participant), control = glmerControl(optimizer ="bobyqa"), family = binomial, data = tough.df)
+summary(tough.mod.pos)#no effect of left-choice-type
+vif.mer(tough.mod.pos)
+
+valley.mod.pos <- glmer(cat_selection ~ condition  + left_choice_type + (1|participant) + (1|exptype)+ (1|stim_type) + (1+condition|participant), control = glmerControl(optimizer ="bobyqa"), family = binomial, data = valley.df)
+summary(valley.mod.pos) #no effect of left-choice-type
+vif.mer(valley.mod.pos)
+```
+
+
+
+#Explists - make sure they are balanced!
+```{r}
+expdata_unbalanced <- expdata
+
+explist.df <- expdata %>%
+  select(participant, expcode, exp_list) %>%
+  unique() %>%
+  group_by(expcode, exp_list) %>%
+  summarize(n = n())
+
+# lets just focus on main explists - ie ignore L/R T/V ordering - as this doesn't seem to make a difference in selections
+expdata.mainlists <- expdata %>%
+  group_by(expcode) %>%
+  mutate(total_exp_lists = max(exp_list)) %>%
+  ungroup() %>%
+  mutate(main_exp_list = ifelse(total_exp_lists == 8 & exp_list > 4, exp_list-4,
+                                ifelse(total_exp_lists == 4 & exp_list > 2, exp_list-2, exp_list)))
+
+main_explist.df <- expdata.mainlists %>%
+  select(participant, exp_list, expcode, main_exp_list) %>%
+  unique() %>%
+  group_by(expcode, main_exp_list) %>%
+  mutate(n = n())
+main_explist.df
+
+expdata.equal <- expdata.mainlists %>%
+  select(participant, expcode, main_exp_list) %>%
+  unique() %>%
+  group_by(expcode, main_exp_list) %>%
+  arrange(participant) %>%
+  mutate(n = row_number(), n_ppts = max(n)) %>%
+  ungroup () %>%
+  group_by(expcode) %>%
+  filter(n <= min(n_ppts))
+
+
+expdata <- semi_join(expdata.mainlists, expdata.equal)
+
+test <- expdata_unbalanced%>%
+  filter(criticality == 'CRITICAL') %>%
+  group_by(expcode, stim_type, condition, styletype) %>%
+  summarize(n_obs = n()) 
+test
+View(test)
+
+# how many we lose if total baalnce?
+total_balanced.lists <- expdata %>%
+  select(participant, exp_list, expcode) %>%
+  unique() %>%
+  group_by(expcode, exp_list) %>%
+  mutate(n = n()) %>%
+  group_by(expcode, exp_list) %>%
+  arrange(participant) %>%
+  mutate(n = row_number(), n_ppts = max(n)) %>%
+  ungroup () %>%
+  group_by(expcode) %>%
+  filter(n <= min(n_ppts))
+total_balanced.lists
+  
+```
+
+# Save csv
+```{r}
+write.csv(expdata, '../data/categorical_exp_data.csv')
+write.csv(expdata_unbalanced, '../data/categorical_exp_data_unbalanced.csv')
+```
+
+
+
+
+#metadata for writeup
+
+## time taken
+```{r}
+expdata.timetaken <- expdata %>%
+  select(participant, time_in_minutes) %>%
+  unique() %>%
+  summarize(mean_tt = mean(time_in_minutes), sd_tt = sd(time_in_minutes) )
+
+expdata.trialtimetaken <- expdata %>%
+  select(participant, trial, rt) %>%
+  group_by(participant) %>%
+  summarize(sum_trials = sum(rt)) %>%
+  ungroup () %>%
+  summarize(mean_trials = mean(sum_trials), sd_trials = sd(sum_trials), mean_trials_mins = mean_trials/60000, sd_trials_mins = sd_trials/60000)
+expdata.trialtimetaken
+```
+
+##ppts per experiment
+```{r}
+n_ppts <- expdata %>%
+  select(participant, expcode) %>%
+  unique() %>%
+  group_by(expcode) %>%
+  summarize(n = n())
+
+n_ppts
+```
+
+## obs per stim per exp
+```{r}
+n_obs_stim_exp <- expdata %>%
+  filter(criticality == 'CRITICAL') %>%
+  select(participant, expcode, trial, condition) %>%
+  unique() %>%
+  group_by(expcode, trial,condition) %>%
+  summarize(n = n()) %>%
+  select(expcode, n, condition) %>%
+  unique() 
+n_obs_stim_exp
+expdata
+```

@@ -1,0 +1,399 @@
+---
+title: Comparing multiple exps
+output: html_document
+---
+
+# CH3: Offline categorical selections for (HRT) and (ING) across multiple exps
+
+
+The csv called here is already preprocessed (attention checked, etc.)
+
+## Prelims
+
+```{r}
+library(tidyverse)
+library(brms)
+library(bayestestR)
+library(see) #for plotting
+library(sjPlot)
+library(emmeans)
+library(see) #for plotting
+source("../analysis_helpers/preprocessing_singlespeaker.R")
+source("../analysis_helpers/visualizing_singlespeaker.R")
+source("../analysis_helpers/stan_utility.R")
+source("../analysis_helpers/helpers.R")
+options(scipen=999)
+```
+
+## Get data
+
+```{r}
+cat_data <- read.csv('../../data/categorical_exp_data.csv')
+```
+
+```{r}
+cat_data <- cat_data %>% filter(criticality == 'CRITICAL') # we're not interested in fillers 
+cat_data$condition <- factor(cat_data$condition, levels = c('Declarative' , 'HRT', 'ing', 'in'))
+cat_data$styletype <- factor(cat_data$styletype, levels = c('(HRT)', '(ING)'))
+```
+
+# Toughs
+
+## compare exp 1 vs exp 2
+
+aka Random order vs solo cue: in write up, random order is exp3, solo cue is exp 1
+
+```{r}
+exp12_tough.df <- cat_data %>%
+  filter(expcode == 1 | expcode == 2,  styletype == '(ING)') 
+
+exp12_tough.df$f_expcode <- as.factor(exp12_tough.df$expcode)
+exp12_tough.df$f_expcode <- relevel(exp12_tough.df$f_expcode, ref= "2")
+levels(exp12_tough.df$f_expcode)
+```
+
+```{r}
+exp12_tough.modInform <- brm(target_selection ~ condition*f_expcode + (1+condition|participant) + (1+condition|stim_type), 
+                               family="bernoulli", 
+                               data= exp12_tough.df,
+                                 prior = c(prior(normal(0, 2), class = b)),
+                               #prior = c(prior(normal(0, 2), class = Intercept), prior(normal(0, 2), class = b)),
+                             cores = 8,
+                                iter = 5000,
+                               seed = 12345, #w default (2000 iter, rhat)
+                               control = list(adapt_delta = 0.99, max_treedepth = 15))
+```
+
+```{r}
+saveRDS(exp12_tough.modInform, file = "../../models/exp12_tough.modInform.Rds")
+```
+
+```{r}
+exp12_tough.modInform <- readRDS("../../models/exp12_tough.modInform.Rds")
+```
+
+```{r}
+summary(exp12_tough.modInform )
+exp12_tough.modInform_post_summ <- describe_posterior(exp12_tough.modInform , centrality = "MAP", test = c("p_direction","rope"), ci=0.95, rope_ci=1)
+exp12_tough.modInform_post_summ
+```
+
+```{r}
+make_post_summ_table(exp12_tough.modInform_post_summ)
+```
+
+
+
+### compare exp 1 and 2 in' only
+
+```{r}
+exp12_in.df <- exp12_tough.df %>%
+filter(condition == 'in')
+```
+
+```{r}
+exp12_in.mod <- brm(target_selection ~ f_expcode + (1|participant) + (1|stim_type), 
+                               family="bernoulli", 
+                               data= exp12_in.df,
+                                 prior = c(prior(normal(0, 2), class = b)),
+                               #prior = c(prior(normal(0, 2), class = Intercept), prior(normal(0, 2), class = b)),
+                             #cores = 8,
+                                #iter = 5000,
+                               seed = 12345) #w default (2000 iter, rhat)
+                               #control = list(adapt_delta = 0.99, max_treedepth = 15))
+```
+
+```{r}
+summary(exp12_in.mod)
+describe_posterior(exp12_in.mod, centrality = "MAP", test = c("p_direction","rope"), ci=0.95, rope_ci=1)
+```
+
+## Compare exp 4 vs exp 5 
+
+```{r}
+exp45_tough.df <- cat_data %>%
+  filter(styletype == '(ING)', expcode == 4 | expcode == 5)
+exp45_tough.df$f_expcode <- as.factor(exp45_tough.df$expcode)
+```
+
+```{r}
+exp45_tough.mod <- brm(target_selection ~ condition*f_expcode + (1+condition|participant) + (1+condition|stim_type), 
+                               family="bernoulli", 
+                               data= exp45_tough.df,
+                                 prior = c(prior(normal(0, 2), class = b)),
+                               #prior = c(prior(normal(0, 2), class = Intercept), prior(normal(0, 2), class = b)),
+                                iter = 7500,
+                             cores = 8,
+                               seed = 12345,
+                               control = list(adapt_delta = 0.99))
+```
+
+```{r}
+saveRDS(exp45_tough.mod, file = "../../models/exp45_tough.mod.Rds")
+```
+
+```{r}
+exp45_tough.mod <- readRDS("../../models/exp45_tough.mod.Rds")
+```
+
+```{r}
+summary(exp45_tough.mod)
+exp45_tough.mod_post_summ <- describe_posterior(exp45_tough.mod, centrality = "MAP", test = c("p_direction","rope"), ci=0.95, rope_ci=1)
+```
+
+```{r}
+make_post_summ_table(exp45_tough.mod_post_summ)
+```
+
+
+
+```{r}
+plot_model(exp45_tough.mod, type = "int")
+emmip(exp45_tough.mod, condition ~ f_expcode, CIs=TRUE, plotit=T)+theme_bw()
+```
+
+## Compare all exps
+
+```{r}
+tough.df <- cat_data %>%
+  filter(styletype == '(ING)')
+
+tough.df$f_expcode <- as.factor(tough.df$expcode)
+tough.df$f_expcode <- relevel(tough.df$f_expcode, ref='2')
+```
+
+```{r}
+tough.mod <- brm(target_selection ~ condition*f_expcode + (1+condition|participant) + (1+condition|stim_type), 
+                               family="bernoulli", 
+                               data= tough.df,
+                                 prior = c(prior(normal(0, 2), class = b)),
+                               #prior = c(prior(normal(0, 2), class = Intercept), prior(normal(0, 2), class = b)),
+                                iter = 7500,
+                             cores = 8,
+                               seed = 12345,
+                               control = list(adapt_delta = 0.99))
+```
+
+```{r}
+saveRDS(tough.mod, file = "../../models/tough.mod.Rds")
+```
+
+```{r}
+tough.mod <- readRDS("../../models/tough.mod.Rds")
+```
+
+```{r}
+summary(tough.mod)
+tough_post_summ <- describe_posterior(tough.mod, centrality = "MAP", test = c("p_direction","rope"), ci=0.95, rope_ci=1)
+```
+
+
+```{r}
+make_post_summ_table(tough_post_summ)
+```
+
+# Valleys
+
+## Compare exp 1 vs exp 3
+
+```{r}
+exp13_valley.df <- cat_data %>%
+  filter(expcode == 1| expcode == 3,   styletype == '(HRT)') 
+
+exp13_valley.df$f_expcode <- as.factor(exp13_valley.df$expcode)
+```
+
+```{r}
+exp13_valley.modInform <- brm(target_selection ~ condition*f_expcode + (1+condition|participant) + (1+condition|stim_type), 
+                               family="bernoulli", 
+                               data= exp13_valley.df,
+                                 prior = c(prior(normal(0, 2), class = b)),
+                               #prior = c(prior(normal(0, 2), class = Intercept), prior(normal(0, 2), class = b)),
+                                iter = 10000,
+                               seed = 12345) #w default (2000 iter, rhat)
+                               #control = list(adapt_delta = 0.99, max_treedepth = 15))
+```
+
+```{r}
+saveRDS(exp13_valley.modInform, file = "../../models/exp13_valley.modInform.Rds")
+```
+
+```{r}
+exp13_valley.modInform <- readRDS("../../models/exp13_valley.modInform.Rds")
+```
+
+```{r}
+summary(exp13_valley.modInform )
+describe_posterior(exp13_valley.modInform , centrality = "MAP", test = c("p_direction","rope"), ci=0.95, rope_ci=1)
+```
+
+## Compare exp 3 vs exp 4
+
+```{r}
+exp34_valley.df <- cat_data %>%
+  filter(expcode == 3 | expcode == 4,  styletype == '(HRT)') 
+
+exp34_valley.df$f_expcode <- as.factor(exp34_valley.df$expcode)
+```
+
+```{r}
+exp34_valley.modInform <- brm(target_selection ~ condition*f_expcode + (1+condition|participant) + (1+condition|stim_type), 
+                               family="bernoulli", 
+                               data= exp34_valley.df,
+                                 prior = c(prior(normal(0, 2), class = b)),
+                               #prior = c(prior(normal(0, 2), class = Intercept), prior(normal(0, 2), class = b)),
+                                iter = 7500,
+                             cores = 8,
+                               seed = 12345) #w default (2000 iter, rhat)
+                               #control = list(adapt_delta = 0.99, max_treedepth = 15))
+```
+
+```{r}
+summary(exp34_valley.modInform)
+describe_posterior(exp34_valley.modInform, centrality = "MAP", test = c("p_direction","rope"), ci=0.95, rope_ci=1)
+```
+
+## Compare exp 4 vs exp 5
+
+```{r}
+exp45_valley.df <- cat_data %>%
+  filter(expcode == 4 | expcode == 5,  styletype == '(HRT)') 
+
+exp45_valley.df$f_expcode <- as.factor(exp45_valley.df$expcode)
+```
+
+```{r}
+exp45_valley.modInform <- brm(target_selection ~ condition*f_expcode + (1+condition|participant) + (1+condition|stim_type), 
+                               family="bernoulli", 
+                               data= exp45_valley.df,
+                                 prior = c(prior(normal(0, 2), class = b)),
+                               #prior = c(prior(normal(0, 2), class = Intercept), prior(normal(0, 2), class = b)),
+                                iter = 7500,
+                             cores = 8,
+                               seed = 12345) #w default (2000 iter, rhat)
+                               #control = list(adapt_delta = 0.99, max_treedepth = 15))
+```
+
+```{r}
+saveRDS(exp45_valley.modInform, file = "../../models/exp45_valley.modInform.Rds")
+```
+
+```{r}
+exp45_valley.modInform <- readRDS("../../models/exp45_valley.modInform.Rds")
+```
+
+```{r}
+summary(exp45_valley.modInform)
+exp45_valley_post_summ  <- describe_posterior(exp45_valley.modInform, centrality = "MAP", test = c("p_direction","rope"), ci=0.95, rope_ci=1)
+exp45_valley_post_summ 
+```
+
+```{r}
+make_post_summ_table(exp45_valley_post_summ)
+ 
+```
+
+
+```{r}
+plot_model(exp45_valley.modInform, type = "int")
+emmip(exp45_valley.modInform, condition ~ f_expcode, CIs=TRUE, plotit=T)+theme_bw()
+```
+
+## Compare all exps
+
+```{r}
+valley.df <- cat_data %>%
+  filter(styletype == '(HRT)')
+
+valley.df$f_expcode <- as.factor(valley.df$expcode)
+valley.df$f_expcode <- relevel(valley.df$f_expcode, ref='3')
+```
+
+```{r}
+valley.mod <- brm(target_selection ~ condition*f_expcode + (1+condition|participant) + (1+condition|stim_type), 
+                               family="bernoulli", 
+                               data= valley.df,
+                                 prior = c(prior(normal(0, 2), class = b)),
+                               #prior = c(prior(normal(0, 2), class = Intercept), prior(normal(0, 2), class = b)),
+                                iter = 10000,
+                             cores = 8,
+                               seed = 12345,
+                               control = list(adapt_delta = 0.99))
+```
+
+```{r}
+saveRDS(valley.mod, file = "../../models/valley.mod.Rds")
+```
+
+```{r}
+valley.mod <- readRDS("../../models/valley.mod.Rds")
+```
+
+```{r}
+summary(valley.mod)
+describe_posterior(valley.mod, centrality = "MAP", test = c("p_direction","rope"), ci=0.95, rope_ci=1)
+```
+
+```{r}
+gender.plot  <- cat_data %>%
+filter(gender != 'Other')%>%
+    group_by(condition, gender) %>%
+    summarize(mean_cat_selection = mean(target_selection),
+              CI.Low = ci.low(target_selection), 
+              CI.High = ci.high(target_selection))%>%
+    mutate(YMin = mean_cat_selection - CI.Low, 
+           YMax = mean_cat_selection + CI.High) %>%
+    ggplot( aes(x=condition, y=mean_cat_selection, fill = condition))+
+    geom_bar(position=position_dodge(), stat = "identity") +
+    geom_errorbar(aes(ymin=YMin,ymax=YMax), width=.25, position=position_dodge(.9)) +
+    #scale_fill_manual(values=palette) + 
+    ylab("Proportion of Tough Selections") +
+    ylim(0, 1) +
+    theme(axis.title.x = element_blank(),
+          axis.text.x = element_text(color="black", size=16),
+          axis.text.y = element_text(size = 14),
+          axis.title.y = element_text(color="black", size=16),
+          legend.title = element_text(color="black", size=16),
+          legend.text = element_text(color="black", size=14))+
+facet_grid(~gender)
+```
+
+```{r}
+gender.plot
+```
+
+```{r}
+gender.plot  <- cat_data %>%
+filter(gender != 'Other')%>%
+    group_by(condition, gender) %>%
+    summarize(mean_cat_selection = mean(target_selection),
+              CI.Low = ci.low(target_selection), 
+              CI.High = ci.high(target_selection))%>%
+    mutate(YMin = mean_cat_selection - CI.Low, 
+           YMax = mean_cat_selection + CI.High) %>%
+    ggplot( aes(x=condition, y=mean_cat_selection, fill = condition))+
+    geom_bar(position=position_dodge(), stat = "identity") +
+    geom_errorbar(aes(ymin=YMin,ymax=YMax), width=.25, position=position_dodge(.9)) +
+    #scale_fill_manual(values=palette) + 
+    ylab("Proportion of Tough Selections") +
+    ylim(0, 1) +
+    theme(axis.title.x = element_blank(),
+          axis.text.x = element_text(color="black", size=16),
+          axis.text.y = element_text(size = 14),
+          axis.title.y = element_text(color="black", size=16),
+          legend.title = element_text(color="black", size=16),
+          legend.text = element_text(color="black", size=14))+
+facet_grid(~gender)
+```
+
+#just want std dev
+
+```{r}
+summary_data <- cat_data%>%
+  filter(criticality == 'CRITICAL') %>%
+  group_by(condition) %>%
+  summarize(mean_tscore = mean(cat_selection), std_dev_tscore = sd(cat_selection))
+
+summary_data
+```
+

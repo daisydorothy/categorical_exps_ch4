@@ -1,0 +1,288 @@
+---
+title: Analysis of ING and HRT stims, presented together but order is randomized
+output: html_document
+---
+
+# CH3: Offline categorical selections for (ING) and (HRT) in Experiment 1
+Experiment 1: (HRT) and (ING) stims in random order.
+
+
+The csv called here is already preprocessed (attention checked, etc.)
+
+## Prelims
+
+```{r}
+library(tidyverse)
+library(brms)
+library(bayestestR)
+library(see) #for plotting
+library(lme4)
+library(emmeans)
+library(sjPlot)
+source("../analysis_helpers/preprocessing_singlespeaker.R")
+source("../analysis_helpers/visualizing_singlespeaker.R")
+source("../analysis_helpers/stan_utility.R")
+source("../analysis_helpers/helpers.R")
+```
+
+## Get data
+
+```{r}
+cat_data <- read.csv('../../data/categorical_exp_data.csv')
+```
+
+```{r}
+cat_data <- cat_data %>% filter(criticality == 'CRITICAL') # we're not interested in fillers 
+cat_data$condition <- factor(cat_data$condition, levels = c('Declarative' , 'HRT', 'ing', 'in'))
+cat_data$styletype <- factor(cat_data$styletype, levels = c('(HRT)', '(ING)'))
+
+```
+
+## Make dfs
+
+```{r}
+exp1.df <- cat_data %>%
+  filter(expcode == 1)
+
+exp1_tough.df <- exp1.df %>%
+  filter(styletype == '(ING)') 
+#exp1_tough.df$c_condition <- myCenter(exp1_tough.df$condition)
+
+exp1_valley.df <- exp1.df %>%
+  filter(styletype == '(HRT)') 
+#exp1_valley.df$c_condition <- myCenter(exp1_valley.df$condition)
+
+```
+
+
+## Model
+
+### TOUGHS
+
+#### Weakly informative priors
+See eg https://discourse.mc-stan.org/t/default-priors-for-logistic-regression-coefficients-in-brms/13742/4 and McElreath 2020
+
+```{r}
+exp1_tough.modInform <- brm(target_selection ~ condition + (1+condition|participant) + (1+condition|stim_type), 
+                               family="bernoulli", 
+                               data= exp1_tough.df,
+                                 prior = c(prior(normal(0, 2), class = b)),
+                               #prior = c(prior(normal(0, 2), class = Intercept), prior(normal(0, 2), class = b)),
+                                iter = 5000,
+                            cores = 8,
+                               seed = 12345, #w default (2000 iter, rhat)
+                               control = list(adapt_delta = 0.99, max_treedepth = 15))
+
+#set_prior("<prior>",class = "b"). T
+#coef = "x2"
+```
+
+```{r}
+saveRDS(exp1_tough.modInform, file = "../../models/exp1_tough.modInform.Rds")
+```
+
+```{r}
+exp1_tough.modInform <- readRDS('../../models/exp1_tough.modInform.Rds')
+```
+
+```{r}
+summary(exp1_tough.modInform)
+exp1_tough.modInform_posterior_summ = describe_posterior(exp1_tough.modInform, centrality = "MAP", test = c("p_direction","rope"), ci=0.95, rope_ci=1)
+exp1_tough.modInform_posterior_summ
+```
+
+```{r}
+result <- estimate_density(exp1_tough.modInform)
+plot(result, show_intercept = TRUE)
+
+result <- rope(exp1_tough.modInform, ci = c(0.9, 0.95))
+plot(result, show_intercept = TRUE, n_columns = 2, rope_color = "red") +
+  scale_fill_brewer(palette = "Greens", direction = -1)
+
+result <- p_direction(exp1_tough.modInform)
+plot(result, show_intercept = TRUE)
+```
+
+```{r}
+mcmc_plot(exp1_tough.modInform, 
+        pars = "^b_",
+         type = "areas",
+        transformations = "exp",
+         prob = 0.95) + 
+  geom_vline(xintercept = 0.5, color = "grey")
+```
+
+```{r}
+make_post_summ_table(exp1_tough.modInform_posterior_summ)
+```
+
+
+
+
+
+
+### VALLEYS
+
+#### Weakly informative priors
+See eg https://discourse.mc-stan.org/t/default-priors-for-logistic-regression-coefficients-in-brms/13742/4 and McElreath 2020
+
+```{r}
+exp1_valley.modInform <- brm(target_selection ~ condition + (1+condition|participant) + (1+condition|stim_type), 
+                               family="bernoulli", 
+                               data= exp1_valley.df,
+                                 prior = c(prior(normal(0, 2), class = b)),
+                               #prior = c(prior(normal(0, 2), class = Intercept), prior(normal(0, 2), class = b)),
+                                iter = 7500,
+                             cores = 8,
+                               seed = 12345) #w default (2000 iter, rhat)
+                               #control = list(adapt_delta = 0.99, max_treedepth = 15))
+
+#set_prior("<prior>",class = "b"). T
+#coef = "x2"
+```
+
+```{r}
+saveRDS(exp1_valley.modInform, file = "../../models/exp1_valley.modInform.Rds")
+```
+
+```{r}
+exp1_valley.modInform <- readRDS(file = "../../models/exp1_valley.modInform.Rds")
+```
+
+```{r}
+summary(exp1_valley.modInform)
+exp1_valley.modInform_posterior_summ <- describe_posterior(exp1_valley.modInform, centrality = "MAP", test = c("p_direction","rope"), ci=0.95, rope_ci=1)
+exp1_valley.modInform_posterior_summ 
+```
+
+```{r}
+make_post_summ_table(exp1_valley.modInform_posterior_summ)
+```
+
+
+
+
+
+# Trial order
+Does trial order have an effect? Ie do people learn x cue means y, or adjust their responses? Use first half/second half of exp. responses
+
+```{r}
+exp1_tough_trial.plot <- plot_categorical_selections_by_trial_n(exp1_tough.df, toughPalette)
+```
+
+```{r}
+exp1_tough_trial.plot
+```
+
+```{r}
+exp1_tough_halves.df <- exp1_tough.df %>%
+mutate(half = as.factor(ifelse(trial_no <= 14, 'first', 'second'))) # 14 not 12 because 24 first two trials are practice
+
+levels(exp1_tough_halves.df$half)
+```
+
+```{r}
+exp1_tough_half.mod <-  brm(target_selection ~ condition*half + (1+condition|participant) + (1+condition|stim_type), 
+                               family="bernoulli", 
+                               data= exp1_tough_halves.df,
+                                 prior = c(prior(normal(0, 2), class = b)),
+                               #prior = c(prior(normal(0, 2), class = Intercept), prior(normal(0, 2), class = b)),
+                                #iter = 7500,
+                             cores = 8,
+                               seed = 12345) #w default (2000 iter, rhat)
+                               #control = list(adapt_delta = 0.99, max_treedepth = 15))
+```
+
+
+```{r}
+saveRDS(exp1_tough_half.mod, '../../models/exp1_tough_half.mod.Rds')
+```
+
+```{r}
+exp1_tough_half.mod <- readRDS('../../models/exp1_tough_half.mod.Rds')
+```
+
+
+```{r}
+summary(exp1_tough_half.mod)
+exp1_tough_half_posterior_summ = describe_posterior(exp1_tough_half.mod, centrality = "MAP", test = c("p_direction","rope"), ci=0.95, rope_ci=1)
+exp1_tough_half_posterior_summ 
+```
+
+```{r}
+make_post_summ_table(exp1_tough_half_posterior_summ )
+```
+
+#### Now Valleys
+
+```{r}
+exp1_valley_trial.plot <- plot_categorical_selections_by_trial_n(exp1_valley.df, valleyPalette)
+```
+
+```{r}
+exp1_valley_trial.plot
+```
+
+```{r}
+exp1_valley_halves.df <- exp1_valley.df %>%
+mutate(half = as.factor(ifelse(trial_no <= 14, 'first', 'second'))) # 14 not 12 because 24 first two trials are practice
+levels(exp1_valley_halves.df$half)
+```
+
+```{r}
+exp1_valley_half.mod <-  brm(target_selection ~ condition*half + (1+condition|participant) + (1+condition|stim_type), 
+                               family="bernoulli", 
+                               data= exp1_valley_halves.df,
+                                 prior = c(prior(normal(0, 2), class = b)),
+                               #prior = c(prior(normal(0, 2), class = Intercept), prior(normal(0, 2), class = b)),
+                                iter = 7500,
+                             cores = 8,
+                               seed = 12345, #w default (2000 iter, rhat)
+                               control = list(adapt_delta = 0.99, max_treedepth = 15))
+```
+
+```{r}
+saveRDS(exp1_valley_half.mod, '../../models/exp1_valley_half.mod.Rds')
+```
+
+```{r}
+exp1_valley_half.mod <- readRDS('../../models/exp1_valley_half.mod.Rds')
+```
+
+```{r}
+summary(exp1_valley_half.mod)
+exp1_valley_half_posterior_summ = describe_posterior(exp1_valley_half.mod, centrality = "MAP", test = c("p_direction","rope"), ci=0.95, rope_ci=1)
+exp1_valley_half_posterior_summ
+```
+
+
+```{r}
+make_post_summ_table(exp1_valley_half_posterior_summ)
+```
+
+```{r}
+plot_model(exp1_valley_half.mod, type = "int")
+emmip(exp1_valley_half.mod, condition ~ half, CIs=TRUE, plotit=T)+theme_bw()
+```
+
+# Decl vs -ing
+
+```{r}
+baseline.df <- exp1.df %>%
+filter(condition == 'ing' |condition == 'Declarative')
+nrow(baseline.df)
+nrow(exp1.df)
+```
+
+```{r}
+baseline.mod <-  brm(target_selection ~ condition + (1+condition|participant) + (1+condition|stim_type), 
+                               family="bernoulli", 
+                               data= baseline.df,
+                                 prior = c(prior(normal(0, 2), class = b)),
+                               #prior = c(prior(normal(0, 2), class = Intercept), prior(normal(0, 2), class = b)),
+                                #iter = 7500,
+                             cores = 8,
+                               seed = 12345) #w default (2000 iter, rhat)
+                               #control = list(adapt_delta = 0.99, max_treedepth = 15)
+```
+
